@@ -1,0 +1,53 @@
+CONDA_ENV_NAME="/project/60007/hpriest/environments/pecan-all-03172026"
+LIB_LOCATION="/project/60007/hpriest/environments/pecan-all-03172026/lib/R/library"
+PACK_LOCATION="${HOME}/hpriest/packed-environments/pecan-all-03172026.tar.gz"
+R_REPOS='c(CRAN = "cloud.r-project.org", pecan = "pecanproject.r-universe.dev", rstudio="https://packagemanager.rstudio.com/all/__linux__/focal/latest")'
+
+conda create --solver=libmamba -y -c r -c conda-forge -p "${CONDA_ENV_NAME}" r-base git wget curl gdal r-remotes r-terra r-readxl r-sf r-rjags r-taxize r-rcurl r-arrow r-swfscmisc r-duckdb r-mcmcpack
+### NOTE: removed r-ncdf4 and converted to netcdf4 --- this is to avoid losing the compiled libraries during packing
+eval "$(conda shell.bash hook)"
+conda activate "${CONDA_ENV_NAME}"
+conda install --solver=libmamba -y -c r -c conda-forge conda-pack awscli r-sensitivity r-traits r-xml2 r-rvest libpq r-devtools netcdf4
+
+which Rscript
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('tidyverse'), lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('ncdf4'), lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "remotes::install_github('ropenscilabs/nneo', lib='${LIB_LOCATION}')"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "remotes::install_github('chuhousen/amerifluxr', lib='${LIB_LOCATION}')"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('PEcAn.data.atmosphere'), lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('PEcAn.workflow'), lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('PEcAn.assim.batch'), lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('PEcAn.all'), lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('PEcAn.RothC'), lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('here', lib='${LIB_LOCATION}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('quarto', lib='${LIB_LOCATION}',repos=${R_REPOS})"
+wget https://github.com/mikefarah/yq/releases/download/v4.2.0/yq_linux_amd64 -O "${CONDA_ENV_NAME}/bin/yq"
+chmod +x "${CONDA_ENV_NAME}/bin/yq"
+#quarto resolution
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.35/quarto-1.9.35-linux-amd64.tar.gz
+tar -C "${CONDA_ENV_NAME}"/lib -xvzf quarto-1.9.35-linux-amd64.tar.gz
+ln -s ~/lib/quarto-1.9.35/bin/quarto "${CONDA_ENV_NAME}"/bin/quarto
+
+# final - pack it
+conda pack -o "$PACK_LOCATION" --ignore-missing-files --include "${CONDA_ENV_NAME}/*"
+
+
+
+#TEST:
+
+Rscript -e 'library(PEcAn.all)'
+# Loading required package: PEcAn.DB
+# Loading required package: PEcAn.settings
+# Loading required package: PEcAn.MA
+# Loading required package: PEcAn.logger
+# Loading required package: PEcAn.utils
+# Loading required package: PEcAn.uncertainty
+# Loading required package: PEcAn.data.atmosphere
+# Loading required package: PEcAn.data.land
+# Loading required package: PEcAn.data.remote
+# adding required package: PEcAn.assim.batch
+# Loading required package: PEcAn.emulator
+# Loading required package: PEcAn.priors
+# Loading required package: PEcAn.benchmark
+# Loading required package: PEcAn.remote
+# Loading required package: PEcAn.workflow

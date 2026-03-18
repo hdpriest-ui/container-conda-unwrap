@@ -1,0 +1,103 @@
+# Option A hybrid build: conda base + renv R package layer
+#
+# WHAT THIS PRODUCES (in /mnt/packed/):
+#   pecan-all.tar.gz  - conda base env (R runtime + system libs) with three extras embedded:
+#                         ${env}/renv.lock           - exact R package versions
+#                         ${env}/renv-source-cache/  - source tarballs for offline restore
+#
+# WHY SPLIT:
+#   conda-pack only packs conda-managed packages here, so --ignore-missing-files is not needed.
+#   R packages are installed to a temporary directory to generate renv.lock and populate the
+#   source cache; they are never placed in the conda env and don't enter the tarball.
+#   At the destination, renv::restore() compiles packages from the embedded source cache
+#   against the destination R runtime, producing correct RPATHs without requiring internet.
+#
+# DESTINATION SETUP: see CARB-Demo-PEcAn-env-walkthrough-hybrid.md
+
+# ---- CONFIG ----
+CONDA_ENV_NAME="/mnt/envs/pecan-all"
+PACK_LOCATION="/mnt/packed/pecan-all.tar.gz"
+TEMP_R_LIB="/tmp/renv-build-lib"
+RENV_SOURCE_CACHE="${CONDA_ENV_NAME}/renv-source-cache"
+R_REPOS='c(CRAN="https://cloud.r-project.org", pecan="https://pecanproject.r-universe.dev", rstudio="https://packagemanager.rstudio.com/all/__linux__/focal/latest")'
+
+# ==============================================================================
+# PHASE 1: build conda base
+# Only conda-managed packages. No install.packages() calls.
+# ==============================================================================
+
+conda create --solver=libmamba -y -c conda-forge -p "${CONDA_ENV_NAME}" \
+  r-base r-remotes r-renv \
+  git wget curl \
+  gdal libpq netcdf4 \
+  r-terra r-readxl r-sf r-rjags r-taxize r-rcurl r-arrow r-swfscmisc r-duckdb r-mcmcpack \
+  r-sensitivity r-traits r-xml2 r-rvest r-devtools \
+  conda-pack awscli
+
+eval "$(conda shell.bash hook)"
+conda activate "${CONDA_ENV_NAME}"
+
+# auxiliary tools
+wget https://github.com/mikefarah/yq/releases/download/v4.2.0/yq_linux_amd64 -O "${CONDA_ENV_NAME}/bin/yq"
+chmod +x "${CONDA_ENV_NAME}/bin/yq"
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.35/quarto-1.9.35-linux-amd64.tar.gz
+tar -C "${CONDA_ENV_NAME}/lib" -xvzf quarto-1.9.35-linux-amd64.tar.gz
+ln -s "${CONDA_ENV_NAME}/lib/quarto-1.9.35/bin/quarto" "${CONDA_ENV_NAME}/bin/quarto"
+
+# ==============================================================================
+# PHASE 2: generate renv.lock and source cache into the conda env (before packing)
+#
+# R packages are installed to a temporary directory outside the conda env so they
+# don't enter the tarball. RENV_PATHS_CACHE points inside the conda env so the
+# downloaded source tarballs DO get packed alongside renv.lock.
+# At the destination, renv::restore() compiles from the embedded source cache
+# against the destination R runtime, producing correct RPATHs without internet.
+# ==============================================================================
+
+mkdir -p "${TEMP_R_LIB}" "${RENV_SOURCE_CACHE}"
+
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' \
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" \
+Rscript -e "
+  options(repos = ${R_REPOS})
+  lib <- '${TEMP_R_LIB}'
+
+  install.packages(c('tidyverse', 'ncdf4', 'here', 'quarto'), lib = lib)
+  remotes::install_github('ropenscilabs/nneo', lib = lib)
+  remotes::install_github('chuhousen/amerifluxr', lib = lib)
+  install.packages(c(
+    'PEcAn.data.atmosphere', 'PEcAn.workflow',
+    'PEcAn.assim.batch', 'PEcAn.all', 'PEcAn.RothC'
+  ), lib = lib)
+
+  renv::snapshot(
+    library  = lib,
+    lockfile = '${CONDA_ENV_NAME}/renv.lock',
+    type     = 'all',
+    prompt   = FALSE
+  )
+"
+
+# ==============================================================================
+# PHASE 3: pack the conda base (with renv.lock embedded)
+# only conda-tracked files (+ renv.lock) are present.
+# ==============================================================================
+
+conda pack -o "${PACK_LOCATION}" -p "${CONDA_ENV_NAME}"
+
+# ==============================================================================
+# TEST (on build machine, optional sanity check)
+# Installs packages into the conda env temporarily to verify they load.
+# This is separate from the build and does not affect the packed tarball.
+# ==============================================================================
+
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' \
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" \
+RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" \
+Rscript -e "
+  renv::restore(lockfile = '${CONDA_ENV_NAME}/renv.lock', prompt = FALSE)
+  library(PEcAn.all)
+  library(PEcAn.RothC)
+  library(tidyverse)
+  library(here)
+"
