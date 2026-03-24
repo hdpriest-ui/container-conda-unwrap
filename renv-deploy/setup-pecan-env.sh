@@ -55,7 +55,9 @@ tar -xzf "${TARBALL}" -C "${PECAN_ENV}"
 # 3. Fix embedded paths
 log "Fixing embedded paths (conda-unpack)..."
 eval "$(conda shell.bash hook)"
+set +u
 conda activate "${PECAN_ENV}"
+set -u
 conda-unpack
 
 # 4. Restore R packages

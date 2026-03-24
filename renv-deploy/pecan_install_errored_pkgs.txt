@@ -1,0 +1,58 @@
+# Debug install for packages that failed in pecan_install_all_hybrid.txt
+# Failed packages: arrow (C++ headers),
+#                  MODISTools and suntools (libnetcdf.so version mismatch)
+# Resolved:        rjags - build JAGS from source into conda env, use PKG_CONFIG_PATH
+
+# ---- CONFIG ----
+CONDA_ENV_NAME="/home/hdpriest/hpriest/improved_environments/environments/pecan-all-debug"
+TEMP_R_LIB="/tmp/renv-build-lib-debug"
+RENV_SOURCE_CACHE="${CONDA_ENV_NAME}/renv-source-cache"
+R_REPOS='c(CRAN="https://cloud.r-project.org", pecan="https://pecanproject.r-universe.dev", rstudio="https://packagemanager.rstudio.com/all/__linux__/focal/latest")'
+JAGS_VERSION="4.3.2"
+JAGS_HOME="${CONDA_ENV_NAME}"
+
+# ==============================================================================
+# PHASE 1: build conda base with only deps needed for failing packages
+# rjags <- jags (built from source into conda env)
+# arrow <- build from source (LIBARROW_BINARY=false, MAKEFLAGS='-j1' to avoid jobserver)
+# MODISTools, suntools <- r-terra, r-sf, netcdf4
+# ==============================================================================
+
+conda create --solver=libmamba --no-pin -y -c r -c conda-forge -p "${CONDA_ENV_NAME}" r-base r-mass r-devtools libpq git wget curl gdal r-remotes r-renv proj libarchive hdf5 udunits2 r-s2 netcdf4
+
+eval "$(conda shell.bash hook)"
+set +u
+conda activate "${CONDA_ENV_NAME}"
+set -u
+
+# Build JAGS from source into the conda env so rjags has no module dependency
+JAGS_BUILD_DIR="/tmp/jags-build"
+mkdir -p "${JAGS_BUILD_DIR}"
+wget -q "https://sourceforge.net/projects/mcmc-jags/files/JAGS/4.x/Source/JAGS-${JAGS_VERSION}.tar.gz" -O "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}.tar.gz"
+tar -xzf "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}.tar.gz" -C "${JAGS_BUILD_DIR}"
+cd "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}"
+./configure --prefix="${CONDA_ENV_NAME}" --with-blas="-lblas" --with-lapack="-llapack"
+make -j4
+make install
+cd -
+
+
+# ==============================================================================
+# PHASE 2: install failing R packages
+# ==============================================================================
+
+mkdir -p "${TEMP_R_LIB}" "${RENV_SOURCE_CACHE}"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('tidyverse', 'here', 'quarto'), lib = '${TEMP_R_LIB}', repos = ${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('Rcpp', lib = '${TEMP_R_LIB}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('DBI', lib = '${TEMP_R_LIB}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages(c('ncdf4'), lib = '${TEMP_R_LIB}', repos=${R_REPOS})"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('sf', lib = '${TEMP_R_LIB}', repos = c('https://bnprks.r-universe.dev', 'https://cloud.r-project.org'))"
+
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('MODISTools', lib = '${TEMP_R_LIB}', repos = ${R_REPOS}, configure.vars = 'INCLUDE_DIR=${CONDA_ENV_NAME}/include LIB_DIR=${CONDA_ENV_NAME}/lib')"
+R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('suntools', lib = '${TEMP_R_LIB}', repos = ${R_REPOS}, configure.vars = 'INCLUDE_DIR=${CONDA_ENV_NAME}/include LIB_DIR=${CONDA_ENV_NAME}/lib')"
+
+PKG_CONFIG_PATH="${JAGS_HOME}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" CC=gcc LDFLAGS="-L${JAGS_HOME}/lib" LD_LIBRARY_PATH="${JAGS_HOME}/lib:${LD_LIBRARY_PATH:-}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "install.packages('rjags', lib = '${TEMP_R_LIB}', repos = ${R_REPOS}, configure.vars = 'JAGS_LIB=${JAGS_HOME}/lib JAGS_INCLUDE=${JAGS_HOME}/include/JAGS')"
+
+# (unset MAKELEVEL MFLAGS; export MAKEFLAGS='-j1'; NOT_CRAN=true LIBARROW_BINARY=false  ARROW_CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-O1'"  R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE=''  Rscript -e "install.packages('arrow', lib = '${TEMP_R_LIB}', repos = ${R_REPOS})")
+
+# R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" Rscript -e "renv::snapshot(library = '${TEMP_R_LIB}', lockfile = '${CONDA_ENV_NAME}/renv.lock', type = 'all', prompt = FALSE)"

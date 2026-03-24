@@ -15,8 +15,8 @@
 # DESTINATION SETUP: see CARB-Demo-PEcAn-env-walkthrough-hybrid.md
 
 # ---- CONFIG ----
-CONDA_ENV_NAME="/home/hdpriest/hpriest/improved_environments/environments/pecan-all"
-PACK_LOCATION="/home/hdpriest/hpriest/improved_environments/packed/pecan-all.tar.gz"
+CONDA_ENV_NAME="/mnt/envs/pecan-all"
+PACK_LOCATION="/mnt/packed/pecan-all.tar.gz"
 TEMP_R_LIB="/tmp/renv-build-lib"
 RENV_SOURCE_CACHE="${CONDA_ENV_NAME}/renv-source-cache"
 R_REPOS='c(CRAN="https://cloud.r-project.org", pecan="https://pecanproject.r-universe.dev", rstudio="https://packagemanager.rstudio.com/all/__linux__/focal/latest")'

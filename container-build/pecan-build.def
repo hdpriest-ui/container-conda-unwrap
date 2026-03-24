@@ -1,0 +1,36 @@
+Bootstrap: docker
+From: ubuntu:{{ OS_VERSION }}
+
+%arguments
+    OS_VERSION=24.04
+
+%post
+    apt-get update && apt-get install -y \
+        curl wget git build-essential ca-certificates \
+        libssl-dev libcurl4-openssl-dev libxml2-dev \
+        libgdal-dev libgeos-dev libproj-dev \
+        libpq-dev libnetcdf-dev \
+        && rm -rf /var/lib/apt/lists/*
+
+    curl -L \
+        https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+        -o /tmp/miniforge.sh
+    bash /tmp/miniforge.sh -b -p /opt/miniforge
+    rm /tmp/miniforge.sh
+    /opt/miniforge/bin/conda init bash
+
+%environment
+    export PATH="/opt/miniforge/bin:$PATH"
+    export CONDA_PREFIX="/opt/miniforge"
+
+%files
+    pecan_install_container.txt /opt/install/pecan_install_container.txt
+    run_install_file.sh /opt/install/run_install_file.sh
+
+%runscript
+    exec bash /opt/install/run_install_file.sh /opt/install/pecan_install_container.txt
+
+%labels
+    OS_VERSION {{ OS_VERSION }}
+    Description Ubuntu {{ OS_VERSION }} build environment for PEcAn conda pack
+    Version 1.0
