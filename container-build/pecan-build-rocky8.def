@@ -1,0 +1,40 @@
+Bootstrap: docker
+From: rockylinux:{{ OS_VERSION }}
+
+%arguments
+    OS_VERSION=8.10
+
+%post
+    # EPEL provides many of the -devel packages; powertools unlocks their deps
+    dnf install -y epel-release
+    dnf config-manager --set-enabled powertools
+
+    dnf install -y \
+        curl wget git gcc gcc-c++ make ca-certificates \
+        openssl-devel libcurl-devel libxml2-devel \
+        gdal-devel geos-devel proj-devel \
+        libpq-devel netcdf-devel \
+        && dnf clean all
+
+    curl -L \
+        https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+        -o /tmp/miniforge.sh
+    bash /tmp/miniforge.sh -b -p /opt/miniforge
+    rm /tmp/miniforge.sh
+    /opt/miniforge/bin/conda init bash
+
+%environment
+    export PATH="/opt/miniforge/bin:$PATH"
+    export CONDA_PREFIX="/opt/miniforge"
+
+%files
+    pecan_install_container.txt /opt/install/pecan_install_container.txt
+    run_install_file.sh /opt/install/run_install_file.sh
+
+%runscript
+    exec bash /opt/install/run_install_file.sh /opt/install/pecan_install_container.txt
+
+%labels
+    OS_VERSION {{ OS_VERSION }}
+    Description Rocky Linux {{ OS_VERSION }} build environment for PEcAn conda pack
+    Version 1.0
