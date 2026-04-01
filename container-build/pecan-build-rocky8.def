@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: rockylinux:{{ OS_VERSION }}
+From: quay.io/rockylinux/rockylinux:{{ OS_VERSION }}
 
 %arguments
     OS_VERSION=8.10
@@ -14,7 +14,11 @@ From: rockylinux:{{ OS_VERSION }}
         openssl-devel libcurl-devel libxml2-devel \
         gdal-devel geos-devel proj-devel \
         libpq-devel netcdf-devel \
-        && dnf clean all
+        blas-devel lapack-devel \
+        cmake \
+        glibc-locale-source glibc-langpack-en \
+        && dnf clean all \
+        && localedef -i en_US -f UTF-8 en_US.UTF-8
 
     curl -L \
         https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
@@ -22,17 +26,20 @@ From: rockylinux:{{ OS_VERSION }}
     bash /tmp/miniforge.sh -b -p /opt/miniforge
     rm /tmp/miniforge.sh
     /opt/miniforge/bin/conda init bash
+    chmod 1777 /tmp
 
 %environment
     export PATH="/opt/miniforge/bin:$PATH"
     export CONDA_PREFIX="/opt/miniforge"
+    export LANG=en_US.UTF-8
+    export LC_ALL=en_US.UTF-8
 
 %files
-    pecan_install_container.txt /opt/install/pecan_install_container.txt
+    pecan_install_carb_pecan1.10.txt /opt/install/install.txt
     run_install_file.sh /opt/install/run_install_file.sh
 
 %runscript
-    exec bash /opt/install/run_install_file.sh /opt/install/pecan_install_container.txt
+    exec bash /opt/install/run_install_file.sh /opt/install/install.txt
 
 %labels
     OS_VERSION {{ OS_VERSION }}
