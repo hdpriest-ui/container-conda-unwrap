@@ -26,4 +26,14 @@ aws s3 cp --endpoint-url https://s3.garage.ccmmf.ncsa.cloud ~/packed/pecan-all-1
 
 ## 4. Deploy at destination
 
-See `setup-pecan-env.sh`.
+Download `setup-pecan-env.sh` and run:
+
+```bash
+bash setup-pecan-env.sh 1.10
+```
+
+An optional second argument sets the install path (default: `~/.conda/envs/pecan-all`):
+
+```bash
+bash setup-pecan-env.sh 1.10 /path/to/envs/pecan-all
+```

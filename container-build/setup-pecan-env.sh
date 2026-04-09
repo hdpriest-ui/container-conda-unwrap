@@ -4,11 +4,30 @@ set -euo pipefail
 # ---- CONFIG ----
 S3_ENDPOINT="https://s3.garage.ccmmf.ncsa.cloud"
 S3_BUCKET="s3://carb/environments"
+S3_REGION="garage"
 DEFAULT_ENV="${HOME}/.conda/envs/pecan-all"
 
 # ---- HELPERS ----
 log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
+
+validate() {
+  log "Verifying..."
+  R_LIBS="${PECAN_ENV}/lib/R/library" \
+  R_LIBS_USER="" \
+  R_LIBS_SITE="" \
+    "${PECAN_ENV}/bin/Rscript" -e "
+      library('PEcAn.all')
+      library('PEcAn.RothC')
+      library('PEcAn.SIPNET')
+      library('PEPRMT')
+      library('tidyverse')
+      library('here')
+      library('arrow')
+      library('duckdb')
+    " || die "Validation failed. Environment at ${PECAN_ENV} may be incomplete."
+  log "Validation complete."
+}
 
 # ---- ARGS ----
 usage() {
@@ -46,7 +65,21 @@ if ! command -v conda >/dev/null 2>&1; then
 fi
 
 if [[ -e "${PECAN_ENV}" ]]; then
-  die "Target path already exists: ${PECAN_ENV}. Remove it or choose a different path."
+  log "Target path already exists: ${PECAN_ENV}. Skipping install — restoring and validating."
+  R_LIBS="${PECAN_ENV}/lib/R/library" \
+  R_LIBS_USER="" \
+  R_LIBS_SITE="" \
+  RENV_PATHS_CACHE="${PECAN_ENV}/renv-source-cache" \
+  RENV_PATHS_SOURCE="${PECAN_ENV}/renv-source-cache/sources" \
+  RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
+    "${PECAN_ENV}/bin/Rscript" -e "
+      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', prompt = FALSE)
+    "
+  validate
+  echo ""
+  echo "Activate the environment with:"
+  echo "  conda activate ${PECAN_ENV}"
+  exit 0
 fi
 
 # ---- MAIN ----
@@ -56,7 +89,7 @@ log "S3 tarball: ${S3_TARBALL}"
 
 # 1. Download
 log "Downloading PEcAn environment tarball from S3..."
-aws s3 cp --endpoint-url "${S3_ENDPOINT}" "${S3_TARBALL}" "${TARBALL}"
+aws s3 cp --endpoint-url "${S3_ENDPOINT}" --region "${S3_REGION}" "${S3_TARBALL}" "${TARBALL}"
 
 # 2. Unpack
 log "Decompressing tarball..."
@@ -84,19 +117,7 @@ RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
   "
 
 # 5. Verify
-log "Verifying..."
-R_LIBS="${PECAN_ENV}/lib/R/library" \
-R_LIBS_USER="" \
-R_LIBS_SITE="" \
-  "${PECAN_ENV}/bin/Rscript" -e "
-    library('PEcAn.all')
-    library('PEcAn.RothC')
-    library('PEcAn.SIPNET')
-    library('tidyverse')
-    library('here')
-    library('arrow')
-    library('duckdb')
-  " || die "Verification failed. Check the renv::restore() output above for errors."
+validate
 
 log "Setup complete."
 echo ""
