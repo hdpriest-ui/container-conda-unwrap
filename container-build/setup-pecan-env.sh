@@ -98,8 +98,8 @@ tar -xzf "${TARBALL}" -C "${PECAN_ENV}"
 
 # 3. Fix embedded paths
 log "Fixing embedded paths (conda-unpack)..."
-eval "$(conda shell.bash hook)"
 set +u
+eval "$(conda shell.bash hook)"
 conda activate "${PECAN_ENV}"
 set -u
 conda-unpack
