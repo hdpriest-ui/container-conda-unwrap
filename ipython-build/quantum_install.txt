@@ -9,7 +9,7 @@
 #     - Registered as a Jupyter/IPython kernel named ${KERNEL_NAME}
 
 # ---- CONFIG ----
-CONDA_ENV_NAME="/mnt/envs/quantum"
+CONDA_ENV_NAME="/home/hdpriest/Environments/environments/quantum"
 KERNEL_NAME="quantum"
 KERNEL_DISPLAY_NAME="Quantum Computing"
 
@@ -43,13 +43,17 @@ set -u
 
 pip install pennylane
 
-pip install 'pennylane-lightning[gpu]'
+pip install 'pennylane-lightning[gpu]' cuquantum-cu12
 
-pip install qiskit
+pip install pennylane-lightning-tensor
+
+pip install qiskit qiskit-ibm-provider
 
 pip install qiskit-aer-gpu
 
 pip install cudaq
+
+pip install --upgrade qiskit-aer
 
 # ==============================================================================
 # PHASE 3: register as Jupyter/IPython kernel
