@@ -1,0 +1,76 @@
+# Quantum computing environment: PennyLane (CPU + CUDA + Tensor Networks), Qiskit + AER-GPU, CUDA-Q
+# CUDA libraries assumed present on the host system.
+#
+# WHAT THIS PRODUCES:
+#   A conda env at ${CONDA_ENV_NAME} with:
+#     - PennyLane + lightning.qubit (CPU), lightning.gpu (NVIDIA CUDA), lightning.tensor (cuQuantum)
+#     - Qiskit base + qiskit-aer-gpu
+#     - CUDA-Q (cudaq)
+#     - Registered as a Jupyter/IPython kernel named ${KERNEL_NAME}
+
+# ---- CONFIG ----
+CONDA_ENV_NAME="/home/hdpriest/Environments/environments/quantum"
+KERNEL_NAME="quantum"
+KERNEL_DISPLAY_NAME="Quantum Computing"
+
+# ==============================================================================
+# PHASE 1: build conda base
+# Python + scientific stack + ipykernel for Jupyter integration
+# ==============================================================================
+
+conda create --solver=libmamba --no-pin -y -c conda-forge -p "${CONDA_ENV_NAME}" python=3.11 pip numpy scipy matplotlib ipykernel
+
+eval "$(conda shell.bash hook)"
+set +u
+conda activate "${CONDA_ENV_NAME}"
+set -u
+
+# ==============================================================================
+# PHASE 2: install quantum computing packages via pip
+#
+# PennyLane:
+#   lightning.qubit  - CPU simulator         (pennylane-lightning)
+#   lightning.gpu    - NVIDIA CUDA simulator  (pennylane-lightning[gpu])
+#   lightning.tensor - NVIDIA CUDA + cuQuantum tensor networks (pennylane-lightning[gpu])
+#
+# Qiskit:
+#   qiskit           - base SDK
+#   qiskit-aer-gpu   - GPU-accelerated AER simulator backend
+#
+# CUDA-Q:
+#   cudaq            - base package
+# ==============================================================================
+
+pip install pennylane
+
+pip install 'pennylane-lightning[gpu]' cuquantum-cu12
+
+pip install pennylane-lightning-tensor
+
+pip install qiskit qiskit-ibm-provider
+
+pip install qiskit-aer-gpu
+
+pip install cudaq
+
+pip install --upgrade qiskit-aer
+
+# ==============================================================================
+# PHASE 3: register as Jupyter/IPython kernel
+# Installs the kernelspec inside the conda env prefix so it is self-contained.
+# ==============================================================================
+
+python -m ipykernel install --prefix="${CONDA_ENV_NAME}" --name "${KERNEL_NAME}" --display-name "${KERNEL_DISPLAY_NAME}"
+
+# ==============================================================================
+# TEST: verify imports and kernel registration
+# ==============================================================================
+
+python -c "import pennylane; print('PennyLane', pennylane.__version__)"
+python -c "import pennylane; dev = pennylane.device('lightning.qubit', wires=2); print('lightning.qubit OK')"
+python -c "import pennylane; dev = pennylane.device('lightning.gpu', wires=2); print('lightning.gpu OK')"
+python -c "import pennylane; dev = pennylane.device('lightning.tensor', wires=2); print('lightning.tensor OK')"
+python -c "import qiskit; print('Qiskit', qiskit.__version__)"
+python -c "from qiskit_aer import AerSimulator; sim = AerSimulator(device='GPU'); print('qiskit-aer-gpu OK')"
+python -c "import cudaq; print('CUDA-Q', cudaq.__version__)"
+jupyter kernelspec list
