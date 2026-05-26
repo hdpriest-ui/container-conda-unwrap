@@ -37,7 +37,7 @@ usage() {
   echo "  ENV_PATH  Optional. Directory to install the environment."
   echo "            Default: ~/.conda/envs/pecan-all"
   echo ""
-  echo "Requirements: aws CLI with a configured profile (default: 'ccmmf'), conda on PATH."
+  echo "Requirements: aws CLI with a configured profile (default: 'magic'), conda on PATH."
   echo "  Override profile: AWS_PROFILE=myprofile $0 <VERSION>"
 }
 
