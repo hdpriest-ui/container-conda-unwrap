@@ -2,9 +2,8 @@
 set -euo pipefail
 
 # ---- CONFIG ----
-S3_ENDPOINT="https://s3.garage.ccmmf.ncsa.cloud"
+S3_PROFILE="${S3_PROFILE:-ccmmf}"
 S3_BUCKET="s3://carb/environments"
-S3_REGION="garage"
 DEFAULT_ENV="${HOME}/.conda/envs/pecan-all"
 
 # ---- HELPERS ----
@@ -38,7 +37,8 @@ usage() {
   echo "  ENV_PATH  Optional. Directory to install the environment."
   echo "            Default: ~/.conda/envs/pecan-all"
   echo ""
-  echo "Requirements: aws CLI configured with appropriate credentials, conda on PATH."
+  echo "Requirements: aws CLI with a configured profile (default: 'ccmmf'), conda on PATH."
+  echo "  Override profile: S3_PROFILE=myprofile $0 <VERSION>"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -89,7 +89,7 @@ log "S3 tarball: ${S3_TARBALL}"
 
 # 1. Download
 log "Downloading PEcAn environment tarball from S3..."
-aws s3 cp --endpoint-url "${S3_ENDPOINT}" --region "${S3_REGION}" "${S3_TARBALL}" "${TARBALL}"
+aws s3 cp --profile "${S3_PROFILE}" "${S3_TARBALL}" "${TARBALL}"
 
 # 2. Unpack
 log "Decompressing tarball..."

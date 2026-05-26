@@ -9,16 +9,16 @@
 #     - Registered as a Jupyter/IPython kernel named ${KERNEL_NAME}
 
 # ---- CONFIG ----
-CONDA_ENV_NAME="/home/hdpriest/Environments/environments/quantum"
-KERNEL_NAME="quantum"
-KERNEL_DISPLAY_NAME="Quantum Computing"
+CONDA_ENV_NAME="${CONDA_ENV_NAME:-/home/hdpriest/Environments/environments/quantum}"
+KERNEL_NAME="${KERNEL_NAME:-quantum}"
+KERNEL_DISPLAY_NAME="${KERNEL_DISPLAY_NAME:-Quantum Computing}"
 
 # ==============================================================================
 # PHASE 1: build conda base
 # Python + scientific stack + ipykernel for Jupyter integration
 # ==============================================================================
 
-conda create --solver=libmamba --no-pin -y -c conda-forge -p "${CONDA_ENV_NAME}" python=3.11 pip numpy scipy matplotlib ipykernel
+conda create --solver=libmamba --no-pin -y -c conda-forge -p "${CONDA_ENV_NAME}" python=3.11 pip numpy scipy matplotlib ipykernel cmake ninja git
 
 eval "$(conda shell.bash hook)"
 set +u
@@ -35,25 +35,25 @@ set -u
 #
 # Qiskit:
 #   qiskit           - base SDK
-#   qiskit-aer-gpu   - GPU-accelerated AER simulator backend
+#   qiskit-aer       - built from source with CUDA + cuStateVec (no pre-built GPU wheel for Qiskit 2.x)
 #
 # CUDA-Q:
 #   cudaq            - base package
 # ==============================================================================
 
+conda install -y -c conda-forge jupyterlab cuquantum
+
 pip install pennylane
-
-pip install 'pennylane-lightning[gpu]' cuquantum-cu12
-
+pip install 'pennylane-lightning[gpu]' 'cuquantum-cu12>=24.03'
 pip install pennylane-lightning-tensor
-
-pip install qiskit qiskit-ibm-provider
-
-pip install qiskit-aer-gpu
-
+pip install qiskit qiskit-ibm-runtime
+pip install scikit-build pybind11 'conan<2'
+git clone --depth 1 https://github.com/Qiskit/qiskit-aer.git /tmp/qiskit-aer-src
+export CUSTATEVEC_ROOT="${CONDA_ENV_NAME}"
+export CMAKE_ARGS="-DAER_THRUST_BACKEND=CUDA -DAER_CUSTATEVEC=True -DCUSTATEVEC_ROOT=${CUSTATEVEC_ROOT} -DCMAKE_CUDA_FLAGS=-I${CUSTATEVEC_ROOT}/include"
+pip install --no-build-isolation /tmp/qiskit-aer-src
 pip install cudaq
 
-pip install --upgrade qiskit-aer
 
 # ==============================================================================
 # PHASE 3: register as Jupyter/IPython kernel

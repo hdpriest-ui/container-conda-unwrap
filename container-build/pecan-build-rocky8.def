@@ -26,7 +26,6 @@ From: quay.io/rockylinux/rockylinux:{{ OS_VERSION }}
     bash /tmp/miniforge.sh -b -p /opt/miniforge
     rm /tmp/miniforge.sh
     /opt/miniforge/bin/conda init bash
-    chmod 1777 /tmp
 
 %environment
     export PATH="/opt/miniforge/bin:$PATH"
@@ -36,7 +35,7 @@ From: quay.io/rockylinux/rockylinux:{{ OS_VERSION }}
 
 %files
     pecan_install_carb_pecan1.10.txt /opt/install/install.txt
-    run_install_file.sh /opt/install/run_install_file.sh
+    ../run_install_file.sh /opt/install/run_install_file.sh
 
 %runscript
     exec bash /opt/install/run_install_file.sh /opt/install/install.txt
