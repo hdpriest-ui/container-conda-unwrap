@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ---- CONFIG ----
-S3_PROFILE="${S3_PROFILE:-ccmmf}"
+S3_PROFILE="${AWS_PROFILE:-ccmmf}"
 S3_BUCKET="s3://carb/environments"
 DEFAULT_ENV="${HOME}/.conda/envs/pecan-all"
 
@@ -38,7 +38,7 @@ usage() {
   echo "            Default: ~/.conda/envs/pecan-all"
   echo ""
   echo "Requirements: aws CLI with a configured profile (default: 'ccmmf'), conda on PATH."
-  echo "  Override profile: S3_PROFILE=myprofile $0 <VERSION>"
+  echo "  Override profile: AWS_PROFILE=myprofile $0 <VERSION>"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
