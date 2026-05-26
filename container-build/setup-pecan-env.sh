@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ---- CONFIG ----
-S3_PROFILE="${AWS_PROFILE:-ccmmf}"
+S3_PROFILE="${AWS_PROFILE:-magic}"
 S3_BUCKET="s3://carb/environments"
 DEFAULT_ENV="${HOME}/.conda/envs/pecan-all"
 
@@ -59,13 +59,23 @@ trap cleanup EXIT
 # ---- PREFLIGHT ----
 command -v aws >/dev/null 2>&1 || die "aws CLI not found. Install or load it before running this script."
 
-if ! (grep -qs "\[${S3_PROFILE}\]" "${HOME}/.aws/credentials" 2>/dev/null || \
-      grep -qs "\[profile ${S3_PROFILE}\]" "${HOME}/.aws/config" 2>/dev/null); then
-  die "AWS profile '${S3_PROFILE}' not found in ~/.aws/credentials or ~/.aws/config.
-       This script requires a named AWS profile with credentials and endpoint configured.
-       To use a different profile, set AWS_PROFILE before running:
-         AWS_PROFILE=myprofile $0 ${PECAN_VERSION:-<VERSION>}
-       To configure the '${S3_PROFILE}' profile, contact your system administrator."
+if ! grep -qs "\[${S3_PROFILE}\]" "${HOME}/.aws/credentials" 2>/dev/null; then
+  die "
+       AWS profile '${S3_PROFILE}' not found in ~/.aws/credentials.
+
+       Add a [${S3_PROFILE}] section with aws_access_key_id and aws_secret_access_key.
+
+       Optionally, to use a different profile, set AWS_PROFILE before running:
+         AWS_PROFILE=myprofile $0 ${PECAN_VERSION:-<VERSION>}"
+fi
+if ! grep -qs "\[profile ${S3_PROFILE}\]" "${HOME}/.aws/config" 2>/dev/null; then
+  die "
+       AWS profile '${S3_PROFILE}' not found in ~/.aws/config.
+
+       Add a [profile ${S3_PROFILE}] section with region and endpoint_url.
+
+       Optionally, to use a different profile, set AWS_PROFILE before running:
+         AWS_PROFILE=myprofile $0 ${PECAN_VERSION:-<VERSION>}"
 fi
 if ! command -v conda >/dev/null 2>&1; then
     log "conda not found. Attempting to load the conda module..."
