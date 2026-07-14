@@ -34,7 +34,7 @@ From: quay.io/rockylinux/rockylinux:{{ OS_VERSION }}
     export LC_ALL=en_US.UTF-8
 
 %files
-    pecan_install_carb_pecan1.10.txt /opt/install/install.txt
+    pecan_install_carb_pecan1.11.txt /opt/install/install.txt
     ../run_install_file.sh /opt/install/run_install_file.sh
 
 %runscript

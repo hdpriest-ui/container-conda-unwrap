@@ -1,0 +1,106 @@
+# Option A hybrid build: conda base + renv R package layer
+#
+# WHAT THIS PRODUCES (in /mnt/packed/):
+#   pecan-all.tar.gz  - conda base env (R runtime + system libs) with three extras embedded:
+#                         ${env}/renv.lock              - exact R package versions
+#                         ${env}/renv-source-cache/     - compiled package cache
+#                         ${env}/renv-source-cache/sources/ - source tarballs for recompilation
+#
+# DESTINATION SETUP: see CARB-Demo-PEcAn-env-walkthrough-hybrid.md
+
+# ---- CONFIG ----
+CONDA_ENV_NAME="/mnt/envs/pecan-all"
+PECAN_VERSION="${PECAN_VERSION:-unknown}"
+PACK_LOCATION="/mnt/packed/pecan-all-${PECAN_VERSION}.tar.gz"
+TEMP_R_LIB="/tmp/renv-build-lib"
+RENV_SOURCE_CACHE="${CONDA_ENV_NAME}/renv-source-cache"
+RENV_PKG_SOURCE="${RENV_SOURCE_CACHE}/sources"
+R_REPOS='c(CRAN="https://cloud.r-project.org", pecan="https://pecanproject.r-universe.dev", rstudio="https://packagemanager.rstudio.com/all/__linux__/focal/latest")'
+JAGS_VERSION="4.3.2"
+JAGS_HOME="${CONDA_ENV_NAME}"
+
+# ==============================================================================
+# PHASE 1: build conda base
+# Only conda-managed packages. No install.packages() calls.
+# r-duckdb provides Parquet/Arrow IPC read-write; arrow-cpp is its runtime dependency.
+# ==============================================================================
+
+conda create --solver=libmamba --no-pin -y -c r -c conda-forge -p "${CONDA_ENV_NAME}" r-base r-remotes r-renv r-mass git libpq wget curl gdal arrow-cpp cmake proj libarchive hdf5 udunits2 r-s2 netcdf4 r-terra r-readxl r-sf r-taxize r-rcurl r-swfscmisc 'r-duckdb>1.4' r-mcmcpack r-sensitivity r-traits r-xml2 r-rvest r-devtools conda-pack awscli cdo cdsapi imagemagick
+
+
+eval "$(conda shell.bash hook)"
+set +u
+conda activate "${CONDA_ENV_NAME}"
+set -u
+
+# Build JAGS from source into the conda env so rjags has no module dependency
+JAGS_BUILD_DIR="/tmp/jags-build"
+mkdir -p "${JAGS_BUILD_DIR}"
+wget -q "https://sourceforge.net/projects/mcmc-jags/files/JAGS/4.x/Source/JAGS-${JAGS_VERSION}.tar.gz" -O "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}.tar.gz"
+tar -xzf "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}.tar.gz" -C "${JAGS_BUILD_DIR}"
+cd "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}"
+./configure --prefix="${CONDA_ENV_NAME}" --with-blas="-lblas" --with-lapack="-llapack"
+make -j4
+make install
+cd -
+
+# auxiliary tools
+wget https://github.com/mikefarah/yq/releases/download/v4.2.0/yq_linux_amd64 -O "${CONDA_ENV_NAME}/bin/yq"
+chmod +x "${CONDA_ENV_NAME}/bin/yq"
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.35/quarto-1.9.35-linux-amd64.tar.gz
+tar -C "${CONDA_ENV_NAME}/lib" -xvzf quarto-1.9.35-linux-amd64.tar.gz
+ln -s "../lib/quarto-1.9.35/bin/quarto" "${CONDA_ENV_NAME}/bin/quarto"
+
+# ==============================================================================
+# PHASE 2: generate renv.lock and source cache into the conda env (before packing)
+#
+# All R packages are installed via renv::install() with both RENV_PATHS_CACHE
+# (compiled package cache) and RENV_PATHS_SOURCE (source tarballs) set to
+# directories inside the conda env. Both get packed into the tarball.
+# TEMP_R_LIB is prepended to .libPaths() on every call so that renv-installed
+# package versions shadow older versions in the conda R library.
+# At the destination, renv::restore() compiles from the embedded source tarballs
+# against the destination R runtime, producing correct RPATHs without internet.
+# ==============================================================================
+
+mkdir -p "${TEMP_R_LIB}" "${RENV_SOURCE_CACHE}" "${RENV_PKG_SOURCE}"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('tidyselect', 'vctrs', 'rlang', 'purrr', 'Rcpp', 'RcppEigen', 'DBI', 'ncdf4', 'yaml'))"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('tidyverse', 'here', 'quarto'))"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('RColorBrewer','cellranger','classInt','fs','gridExtra','httpcode','jquerylib','labeling','memoise','pkgconfig','plyr','prettyunits','stringi','triebeard','BiocManager'))"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = c('https://bnprks.r-universe.dev', 'https://cloud.r-project.org')); renv::install('sf')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('MODISTools', configure.vars = 'INCLUDE_DIR=${CONDA_ENV_NAME}/include LIB_DIR=${CONDA_ENV_NAME}/lib')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('suntools', configure.vars = 'INCLUDE_DIR=${CONDA_ENV_NAME}/include LIB_DIR=${CONDA_ENV_NAME}/lib')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(timeout=300); renv::install('github::ropenscilabs/nneo')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(timeout=300); renv::install('github::chuhousen/amerifluxr')"
+ARROW_HOME="${CONDA_ENV_NAME}" RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('arrow@13.0.0.1')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}, timeout = 600); renv::install(c('PEcAn.logger', 'PEcAn.utils', 'PEcAn.settings', 'PEcAn.DB', 'PEcAn.remote', 'PEcAn.priors', 'PEcAn.MA', 'PEcAn.emulator', 'PEcAn.uncertainty'))"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}, timeout = 600); renv::install(c('PEcAn.data.atmosphere', 'PEcAn.data.land', 'PEcAn.data.remote', 'PEcAn.benchmark', 'PEcAn.workflow', 'PEcAn.assim.batch', 'PEcAn.all', 'PEcAn.RothC', 'PEcAn.SIPNET', 'PEPRMT'))"
+PKG_CONFIG_PATH="${JAGS_HOME}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" CC=gcc LDFLAGS="-L${JAGS_HOME}/lib" LD_LIBRARY_PATH="${JAGS_HOME}/lib:${LD_LIBRARY_PATH:-}" RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('rjags', configure.vars = 'JAGS_LIB=${JAGS_HOME}/lib JAGS_INCLUDE=${JAGS_HOME}/include/JAGS')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('ggplot2')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('argparse', 'iml', 'janitor', 'magick', 'patchwork', 'randomForest', 'ranger', 'svglite', 'future', 'furrr'))"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(timeout = 300); renv::install('github::dlebauer/pecan/modules/assim.sequential@ensemble_downscaling')"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); renv::snapshot(library = c('${TEMP_R_LIB}', '${CONDA_ENV_NAME}/lib/R/library'), lockfile = '${CONDA_ENV_NAME}/renv.lock', type = 'all', prompt = FALSE, force = TRUE)"
+
+# ==============================================================================
+# PHASE 3: pack the conda base (with renv.lock embedded)
+# only conda-tracked files (+ renv.lock) are present.
+# ==============================================================================
+
+conda pack --ignore-missing-files -o "${PACK_LOCATION}" -p "${CONDA_ENV_NAME}"
+
+# ==============================================================================
+# TEST (on build machine, optional sanity check)
+# Restores packages from the embedded source cache to verify offline restore works.
+# This is separate from the build and does not affect the packed tarball.
+# ==============================================================================
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "renv::restore(lockfile = '${CONDA_ENV_NAME}/renv.lock', prompt = FALSE)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEcAn.all)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEcAn.RothC)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEcAn.SIPNET)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEPRMT)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(tidyverse)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(here)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(arrow)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(duckdb)"
