@@ -1,0 +1,228 @@
+# Option A hybrid build: conda base + renv R package layer
+#
+# WHAT THIS PRODUCES (in /mnt/packed/):
+#   pecan-all.tar.gz  - conda base env (R runtime + system libs) with three extras embedded:
+#                         ${env}/renv.lock              - exact R package versions
+#                         ${env}/renv-source-cache/     - compiled package cache
+#                         ${env}/renv-source-cache/sources/ - source tarballs for recompilation
+#
+# DESTINATION SETUP: see CARB-Demo-PEcAn-env-walkthrough-hybrid.md
+#
+# v1.17 changes from v1.16:
+#   - PEcAn.SIPNET pulled off develop instead of r-universe (fix not yet in
+#     an r-universe build); split out of the batch renv::install() it used
+#     to share with PEcAn.all et al., same pattern as assim.sequential below.
+#   - PEcAn.data.remote likewise pulled off develop instead of r-universe.
+#     Unlike PEcAn.SIPNET, it's a hard Depends of PEcAn.all, so it's
+#     installed in its own renv::install() call before (not after) the
+#     PEcAn.all batch, so renv doesn't pull the r-universe copy back in as
+#     PEcAn.all's own dependency.
+#   - conda install now also pulls libgdal-arrow-parquet (GDAL's Arrow/Parquet
+#     raster-driver plugin, alongside the existing libgdal-hdf5/libgdal-netcdf)
+#     and duckdb (the standalone CLI binary; distinct from the R duckdb
+#     package below, which bundles its own DuckDB build and doesn't need it).
+#   - renv::install now also installs nanoarrow.
+#
+# v1.16 changes from v1.15:
+#  - updated yq to v4.53.4
+#
+# v1.15 changes from v1.14:
+#   - conda install now also pulls fftw, libtiff, and xorg-libx11. imager's
+#     SystemRequirements are fftw3, libtiff, and X11; PKG_CONFIG_PATH already
+#     points at ${env}/lib/pkgconfig (exported below), so imager's configure
+#     script picks these up via pkg-config with no extra configure.vars.
+#   - conda install now also pulls libgdal-hdf5 and libgdal-netcdf, the GDAL
+#     raster driver plugins for HDF5 and netCDF, so gdal-backed reads/writes
+#     of those formats work without falling back to a driver-less build.
+#   - renv::install now also installs doMC, matrixStats, RcppRoll, imager,
+#     and WGCNA. WGCNA Imports two Bioconductor-only packages (impute,
+#     preprocessCore) that don't exist on CRAN/pecan r-universe/RSPM, so
+#     those are installed first via renv's bioc:: remote syntax (using the
+#     BiocManager already renv-installed in the CRAN-utility batch below)
+#     before WGCNA itself is requested.
+#
+# v1.14 changes from v1.13:
+#   - conda install now also pulls zeromq, numpy, pandas, shapely, and tqdm.
+#     zeromq is the system ZeroMQ (libzmq) that clustermq links against for
+#     HPC/cluster job dispatch (optional per clustermq's SystemRequirements,
+#     but bundling libzmq from source inside the R build is slower and less
+#     reliable than linking the conda-provided one); numpy/pandas/shapely/tqdm
+#     are added explicitly even though geopandas/fiona/dask already pull most
+#     of them in transitively, so they're pinned as first-class requirements
+#     rather than incidental.
+#   - renv::install now also installs clustermq, config, crew, crew.cluster,
+#     tarchetypes, and targets — the targets-based pipeline/orchestration
+#     stack, plus crew/crew.cluster and clustermq for distributed execution
+#     on HPC schedulers.
+#
+# v1.13 changes from v1.12:
+#   - conda install now also pulls libsecret, glib, libboost-devel, and
+#     pkg-config. renv::restore() at the destination previously relied on
+#     these being present as ambient system libraries (true on our own
+#     hosts, false on at least one third-party HPC). keyring needs libsecret
+#     to link, and specifically needs glib (not just the libglib runtime lib
+#     that libsecret pulls in transitively) for glibconfig.h; arrow's
+#     bundled C++ build needs boost headers/libs when it can't find a
+#     prebuilt libarrow; pkg-config itself must not depend on whatever the
+#     destination host happens to have on its system PATH.
+
+# ---- CONFIG ----
+PECAN_VERSION="${PECAN_VERSION:-unknown}"
+CONDA_ENV_NAME="/mnt/envs/pecan-all-${PECAN_VERSION}"
+PACK_LOCATION="/mnt/packed/pecan-all-${PECAN_VERSION}.tar.gz"
+TEMP_R_LIB="/tmp/renv-build-lib"
+RENV_SOURCE_CACHE="${CONDA_ENV_NAME}/renv-source-cache"
+RENV_PKG_SOURCE="${RENV_SOURCE_CACHE}/sources"
+R_REPOS='c(CRAN="https://cloud.r-project.org", pecan="https://pecanproject.r-universe.dev", rstudio="https://packagemanager.rstudio.com/all/__linux__/focal/latest")'
+JAGS_VERSION="4.3.2"
+JAGS_HOME="${CONDA_ENV_NAME}"
+
+# ==============================================================================
+# PHASE 1: build conda base
+# Only conda-managed packages. No install.packages() calls.
+# r-duckdb provides Parquet/Arrow IPC read-write; arrow-cpp is its runtime dependency.
+# ==============================================================================
+
+# reduced first stage to just R to make updates easier and conda-solves lighter.
+conda create --solver=libmamba --no-pin -y -c conda-forge -p "${CONDA_ENV_NAME}" 'r-base=4.5.3'
+# Moved everything that doesn't need a special sauce system library to be handled inside of the R installs.
+# Packages moved out of this install will be preserved by renv in the environment.
+conda install --solver=libmamba --no-pin -y -c conda-forge -p "${CONDA_ENV_NAME}" r-remotes r-renv git libpq wget curl gdal 'libarrow=23.0.1' 'libarrow-acero=23.0.1' 'libarrow-compute=23.0.1' 'libarrow-dataset=23.0.1' 'libarrow-substrait=23.0.1' 'libparquet=23.0.1' cmake proj libarchive hdf5 udunits2 r-s2 netcdf4 r-terra r-readxl r-sf freetype fontconfig harfbuzz fribidi libpng libjpeg-turbo conda-pack awscli cdo cdsapi imagemagick cxx-compiler fiona geopandas ipython dask 'pyarrow=23.0.1' libsecret glib libboost-devel pkg-config zeromq numpy pandas shapely tqdm fftw libtiff xorg-libx11 libgdal-hdf5 libgdal-netcdf libgdal-arrow-parquet duckdb
+
+eval "$(conda shell.bash hook)"
+set +u
+conda activate "${CONDA_ENV_NAME}"
+set -u
+
+# Needed so source builds (e.g. systemfonts, via devtools->pkgdown->ragg in Phase 2)
+# can find fontconfig.pc/freetype2.pc etc. installed above.
+export PKG_CONFIG_PATH="${CONDA_ENV_NAME}/lib/pkgconfig:${CONDA_ENV_NAME}/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+# Build JAGS from source into the conda env so rjags has no module dependency
+JAGS_BUILD_DIR="/tmp/jags-build"
+mkdir -p "${JAGS_BUILD_DIR}"
+wget -q "https://sourceforge.net/projects/mcmc-jags/files/JAGS/4.x/Source/JAGS-${JAGS_VERSION}.tar.gz" -O "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}.tar.gz"
+tar -xzf "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}.tar.gz" -C "${JAGS_BUILD_DIR}"
+cd "${JAGS_BUILD_DIR}/JAGS-${JAGS_VERSION}"
+./configure --prefix="${CONDA_ENV_NAME}" --with-blas="-lblas" --with-lapack="-llapack"
+make -j4
+make install
+cd -
+
+# auxiliary tools
+wget https://github.com/mikefarah/yq/releases/download/v4.53.4/yq_linux_amd64 -O "${CONDA_ENV_NAME}/bin/yq"
+chmod +x "${CONDA_ENV_NAME}/bin/yq"
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.35/quarto-1.9.35-linux-amd64.tar.gz
+tar -C "${CONDA_ENV_NAME}/lib" -xvzf quarto-1.9.35-linux-amd64.tar.gz
+ln -s "../lib/quarto-1.9.35/bin/quarto" "${CONDA_ENV_NAME}/bin/quarto"
+
+# ==============================================================================
+# PHASE 2: generate renv.lock and source cache into the conda env (before packing)
+#
+# All R packages are installed via renv::install() with both RENV_PATHS_CACHE
+# (compiled package cache) and RENV_PATHS_SOURCE (source tarballs) set to
+# directories inside the conda env. Both get packed into the tarball.
+# TEMP_R_LIB is prepended to .libPaths() on every call so that renv-installed
+# package versions shadow older versions in the conda R library.
+# At the destination, renv::restore() compiles from the embedded source tarballs
+# against the destination R runtime, producing correct RPATHs without internet.
+# ==============================================================================
+
+# clean up possibly stale state
+rm -rf "${RENV_SOURCE_CACHE}"
+rm -rf "${TEMP_R_LIB}"
+mkdir -p "${TEMP_R_LIB}" "${RENV_SOURCE_CACHE}" "${RENV_PKG_SOURCE}"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('tidyselect', 'vctrs', 'rlang', 'purrr', 'Rcpp', 'RcppEigen', 'DBI', 'ncdf4', 'yaml'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('MASS', 'RCurl', 'xml2', 'rvest', 'devtools', 'taxize', 'swfscMisc', 'MCMCpack', 'sensitivity', 'traits'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('dplyr', 'dbplyr', 'tidyverse', 'here', 'quarto'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('RColorBrewer','cellranger','classInt','fs','gridExtra','httpcode','jquerylib','labeling','memoise','pkgconfig','plyr','prettyunits','stringi','triebeard','BiocManager'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}, renv.install.timeout = 7200); renv::install(c('duckdb'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = c('https://bnprks.r-universe.dev', 'https://cloud.r-project.org')); renv::install('sf')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('exactextractr', 'CropScapeR'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('MODISTools', configure.vars = 'INCLUDE_DIR=${CONDA_ENV_NAME}/include LIB_DIR=${CONDA_ENV_NAME}/lib')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('suntools', configure.vars = 'INCLUDE_DIR=${CONDA_ENV_NAME}/include LIB_DIR=${CONDA_ENV_NAME}/lib')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(timeout=300); renv::install('github::ropenscilabs/nneo')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(timeout=300); renv::install('github::chuhousen/amerifluxr')"
+
+ARROW_HOME="${CONDA_ENV_NAME}" RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('arrow@23.0.1.2')"
+
+# nanoarrow vendors its own C library and doesn't link against libarrow/ARROW_HOME
+# like the arrow package above, so it's just a plain CRAN install.
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('nanoarrow')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}, timeout = 600); renv::install(c('PEcAn.logger', 'PEcAn.utils', 'PEcAn.settings', 'PEcAn.DB', 'PEcAn.remote', 'PEcAn.priors', 'PEcAn.MA', 'PEcAn.emulator', 'PEcAn.uncertainty'))"
+
+# PEcAn.data.remote needs a fix that's only on develop, not yet in an
+# r-universe build. Unlike PEcAn.SIPNET (a Suggests of PEcAn.all),
+# PEcAn.data.remote is a hard Depends of PEcAn.all, so it must land in
+# TEMP_R_LIB here, before the PEcAn.all batch below -- otherwise renv would
+# just pull the r-universe release copy back in as PEcAn.all's dependency.
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}, timeout = 600); renv::install('github::PecanProject/pecan/modules/data.remote@develop')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}, timeout = 600); renv::install(c('PEcAn.data.atmosphere', 'PEcAn.data.land', 'PEcAn.benchmark', 'PEcAn.workflow', 'PEcAn.assim.batch', 'PEcAn.all', 'PEcAn.RothC', 'PEPRMT'))"
+
+# PEcAn.SIPNET needs a fix that's only on develop, not yet in an r-universe
+# build, so (like assim.sequential below) it's installed straight from the
+# monorepo subdir instead of the batch above. PEcAn.all only Suggests
+# PEcAn.SIPNET (not Depends/Imports), so pulling it separately here doesn't
+# get shadowed by an r-universe copy installed as a PEcAn.all dependency.
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(timeout = 300); renv::install('github::PecanProject/pecan/models/sipnet@develop')"
+
+PKG_CONFIG_PATH="${JAGS_HOME}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" CC=gcc LDFLAGS="-L${JAGS_HOME}/lib" LD_LIBRARY_PATH="${JAGS_HOME}/lib:${LD_LIBRARY_PATH:-}" RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('rjags', configure.vars = 'JAGS_LIB=${JAGS_HOME}/lib JAGS_INCLUDE=${JAGS_HOME}/include/JAGS')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install('ggplot2')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('argparse', 'iml', 'janitor', 'magick', 'patchwork', 'randomForest', 'ranger', 'svglite', 'future', 'furrr'))"
+
+# WGCNA Imports two Bioconductor-only packages (impute, preprocessCore) not
+# hosted on CRAN/pecan r-universe/RSPM. renv's bioc:: remote resolves these
+# via the BiocManager installed above; must land in TEMP_R_LIB before WGCNA
+# itself is requested so renv sees the Imports as already satisfied.
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('bioc::impute', 'bioc::preprocessCore'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('doMC', 'matrixStats', 'RcppRoll', 'imager', 'WGCNA'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(repos = ${R_REPOS}); renv::install(c('targets', 'tarchetypes', 'config', 'clustermq', 'crew', 'crew.cluster'))"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${TEMP_R_LIB}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); options(timeout = 300); renv::install('github::PecanProject/pecan/modules/assim.sequential@develop')"
+
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e ".libPaths(c('${TEMP_R_LIB}', .libPaths())); renv::snapshot(library = c('${TEMP_R_LIB}', '${CONDA_ENV_NAME}/lib/R/library'), lockfile = '${CONDA_ENV_NAME}/renv.lock', type = 'all', prompt = FALSE, force = TRUE)"
+
+# r-universe (pecanproject.r-universe.dev) stamps built packages' DESCRIPTION with RemoteType/RemoteUrl/RemoteSha/RemoteSubdir provenance from the pecan monorepo, even though they install as ordinary Source: "Repository" packages. renv::restore() sees those fields and misidentifies the record as needing git-style subdir extraction, which fails offline (the cached source tarball is version-named and already flattened, not SHA-named/nested). Strip the stray fields here so the shipped lockfile restores via the normal repository path everywhere it's used.
+Rscript -e "lockfile <- renv:::renv_lockfile_read('${CONDA_ENV_NAME}/renv.lock'); fields <- c('RemoteType', 'RemoteUrl', 'RemoteHost', 'RemoteRepo', 'RemoteUsername', 'RemoteRef', 'RemoteSha', 'RemoteSubdir', 'RemotePkgRef'); for (name in names(lockfile\$Packages)) { rec <- lockfile\$Packages[[name]]; if (identical(rec\$Source, 'Repository')) { rec[fields] <- NULL; lockfile\$Packages[[name]] <- rec } }; renv:::renv_lockfile_write(lockfile, file = '${CONDA_ENV_NAME}/renv.lock')"
+
+# ==============================================================================
+# PHASE 3: pack the conda base (with renv.lock embedded)
+# only conda-tracked files (+ renv.lock) are present.
+# ==============================================================================
+
+conda-pack --ignore-missing-files -o "${PACK_LOCATION}" -p "${CONDA_ENV_NAME}"
+
+# ==============================================================================
+# TEST (on build machine, optional sanity check)
+# Restores packages from the embedded source cache to verify offline restore works.
+# This is separate from the build and does not affect the packed tarball.
+# ==============================================================================
+
+ARROW_HOME="${CONDA_ENV_NAME}" PKG_CONFIG_PATH="${CONDA_ENV_NAME}/lib/pkgconfig:${CONDA_ENV_NAME}/share/pkgconfig" PKG_CONFIG_LIBDIR="${CONDA_ENV_NAME}/lib/pkgconfig:${CONDA_ENV_NAME}/share/pkgconfig" RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "renv::restore(lockfile = '${CONDA_ENV_NAME}/renv.lock', prompt = FALSE)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEcAn.all)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEcAn.RothC)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEcAn.SIPNET)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(PEPRMT)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(tidyverse)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(here)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(arrow)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(duckdb)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(imager)"
+RENV_PATHS_CACHE="${RENV_SOURCE_CACHE}" RENV_PATHS_SOURCE="${RENV_PKG_SOURCE}" RENV_PATHS_LIBRARY="${CONDA_ENV_NAME}/lib/R/library" R_LIBS='' R_HOME='' R_LIBS_USER='' R_LIBS_SITE='' Rscript -e "library(WGCNA)"
