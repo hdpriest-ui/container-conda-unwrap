@@ -109,6 +109,10 @@ if [[ -e "${PECAN_ENV}" ]]; then
   ARROW_HOME="${PECAN_ENV}" \
   PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
   PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+  OPENBLAS_NUM_THREADS=1 \
+  OMP_NUM_THREADS=1 \
+  LIBRARY_PATH="${PECAN_ENV}/lib" \
+  LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     "${PECAN_ENV}/bin/Rscript" -e "
       options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
       renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
@@ -122,6 +126,10 @@ if [[ -e "${PECAN_ENV}" ]]; then
   ARROW_HOME="${PECAN_ENV}" \
   PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
   PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+  OPENBLAS_NUM_THREADS=1 \
+  OMP_NUM_THREADS=1 \
+  LIBRARY_PATH="${PECAN_ENV}/lib" \
+  LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     "${PECAN_ENV}/bin/Rscript" -e "
       options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
       renv::restore(lockfile = '${PECAN_ENV}/renv.lock', prompt = FALSE)
@@ -166,6 +174,10 @@ RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
 ARROW_HOME="${PECAN_ENV}" \
 PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
 PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+OPENBLAS_NUM_THREADS=1 \
+OMP_NUM_THREADS=1 \
+LIBRARY_PATH="${PECAN_ENV}/lib" \
+LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
     options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
     renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
@@ -179,6 +191,10 @@ RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
 ARROW_HOME="${PECAN_ENV}" \
 PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
 PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+OPENBLAS_NUM_THREADS=1 \
+OMP_NUM_THREADS=1 \
+LIBRARY_PATH="${PECAN_ENV}/lib" \
+LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
     options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
     renv::restore(lockfile = '${PECAN_ENV}/renv.lock', prompt = FALSE)
