@@ -104,13 +104,18 @@ if [[ -e "${PECAN_ENV}" ]]; then
   eval "$(conda shell.bash hook)"
   conda activate "${PECAN_ENV}"
   set -u
-  # Installed in isolation, and before anything that depends on them: PEcAn.data.remote
-  # and PEcAn.SIPNET are both pulled from GitHub develop instead of r-universe while also
-  # being reachable through other packages' (e.g. PEcAnAssimSequential's) dependency
-  # graphs. Restoring them only after — or alongside — those other packages lets pak's
-  # install graph pull in a second copy of the same package and race itself while staging
-  # ("target file ... already exists" under renv-graph-staging). Doing them first means
-  # later restores just see an already-satisfied dependency instead of re-resolving it.
+  # PEcAn.data.remote and PEcAn.SIPNET are genuinely GitHub-subdir packages in the
+  # lockfile (modules/data.remote, models/sipnet — pulled off develop, not yet in an
+  # r-universe build). renv::restore()'s git-style subdir extraction for records like
+  # this stages into a path keyed only by package name, and collides with itself
+  # ("target file ... already exists" under renv-graph-staging) regardless of
+  # ordering or parallelism. Installing them directly via renv::install() sidesteps
+  # restore()'s graph/staging path entirely; later restore() calls then see them as
+  # already-satisfied and skip them. Pinning to the RemoteSha already recorded in the
+  # lockfile (rather than the floating "develop" branch) is required, not cosmetic:
+  # it's what lets this reuse the source tarball already cached at build time under
+  # RENV_PATHS_SOURCE/renv-source-cache, instead of re-resolving "develop" against
+  # GitHub right now and possibly pulling a different, untested commit.
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
   R_LIBS_SITE="" \
@@ -125,8 +130,13 @@ if [[ -e "${PECAN_ENV}" ]]; then
   LIBRARY_PATH="${PECAN_ENV}/lib" \
   LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     "${PECAN_ENV}/bin/Rscript" -e "
-      options(renv.install.timeout = 21600, renv.config.install.jobs = 1)
-      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote', 'PEcAn.SIPNET'), prompt = FALSE)
+      options(renv.install.timeout = 21600, repos = c(CRAN = 'https://cloud.r-project.org', pecan = 'https://pecanproject.r-universe.dev'), timeout = 600)
+      lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
+      for (pkg in c('PEcAn.data.remote', 'PEcAn.SIPNET')) {
+        rec <- lockfile\$Packages[[pkg]]
+        spec <- paste0('github::', rec\$RemoteUsername, '/', rec\$RemoteRepo, '/', rec\$RemoteSubdir, '@', rec\$RemoteSha)
+        renv::install(spec)
+      }
     "
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
@@ -193,13 +203,18 @@ conda-unpack
 
 # 4. Restore R packages
 log "Restoring R packages — this takes 20-40 minutes..."
-# Installed in isolation, and before anything that depends on them: PEcAn.data.remote
-# and PEcAn.SIPNET are both pulled from GitHub develop instead of r-universe while also
-# being reachable through other packages' (e.g. PEcAnAssimSequential's) dependency
-# graphs. Restoring them only after — or alongside — those other packages lets pak's
-# install graph pull in a second copy of the same package and race itself while staging
-# ("target file ... already exists" under renv-graph-staging). Doing them first means
-# later restores just see an already-satisfied dependency instead of re-resolving it.
+# PEcAn.data.remote and PEcAn.SIPNET are genuinely GitHub-subdir packages in the
+# lockfile (modules/data.remote, models/sipnet — pulled off develop, not yet in an
+# r-universe build). renv::restore()'s git-style subdir extraction for records like
+# this stages into a path keyed only by package name, and collides with itself
+# ("target file ... already exists" under renv-graph-staging) regardless of
+# ordering or parallelism. Installing them directly via renv::install() sidesteps
+# restore()'s graph/staging path entirely; later restore() calls then see them as
+# already-satisfied and skip them. Pinning to the RemoteSha already recorded in the
+# lockfile (rather than the floating "develop" branch) is required, not cosmetic:
+# it's what lets this reuse the source tarball already cached at build time under
+# RENV_PATHS_SOURCE/renv-source-cache, instead of re-resolving "develop" against
+# GitHub right now and possibly pulling a different, untested commit.
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
 R_LIBS_SITE="" \
@@ -214,8 +229,13 @@ OMP_NUM_THREADS=1 \
 LIBRARY_PATH="${PECAN_ENV}/lib" \
 LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
-    options(renv.install.timeout = 21600, renv.config.install.jobs = 1)
-    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote', 'PEcAn.SIPNET'), prompt = FALSE)
+    options(renv.install.timeout = 21600, repos = c(CRAN = 'https://cloud.r-project.org', pecan = 'https://pecanproject.r-universe.dev'), timeout = 600)
+    lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
+    for (pkg in c('PEcAn.data.remote', 'PEcAn.SIPNET')) {
+      rec <- lockfile\$Packages[[pkg]]
+      spec <- paste0('github::', rec\$RemoteUsername, '/', rec\$RemoteRepo, '/', rec\$RemoteSubdir, '@', rec\$RemoteSha)
+      renv::install(spec)
+    }
   "
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
