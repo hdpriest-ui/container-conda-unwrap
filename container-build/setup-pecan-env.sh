@@ -5,6 +5,7 @@ set -euo pipefail
 S3_PROFILE="${AWS_PROFILE:-magic}"
 S3_BUCKET="s3://carb/environments"
 DEFAULT_ENV="${HOME}/.conda/envs/pecan-all"
+INSTALL_JOBS="${INSTALL_JOBS:-${SLURM_CPUS_PER_TASK:-2}}"
 
 # ---- HELPERS ----
 log()  { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -50,6 +51,9 @@ usage() {
   echo ""
   echo "Requirements: aws CLI with a configured profile (default: 'magic'), conda on PATH."
   echo "  Override profile: AWS_PROFILE=myprofile $0 <VERSION>"
+  echo ""
+  echo "  Override parallel R package install jobs (default: \$SLURM_CPUS_PER_TASK, else 2):"
+  echo "    INSTALL_JOBS=4 $0 <VERSION>"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -140,7 +144,7 @@ if [[ -e "${PECAN_ENV}" ]]; then
   LIBRARY_PATH="${PECAN_ENV}/lib" \
   LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     "${PECAN_ENV}/bin/Rscript" -e "
-      options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
+      options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
       renv::restore(lockfile = '${PECAN_ENV}/renv.lock', exclude = c('PEcAn.data.remote', 'PEcAn.SIPNET', 'PEcAn.workflow', 'PEcAnAssimSequential'), prompt = FALSE)
     "
   R_LIBS="${PECAN_ENV}/lib/R/library" \
@@ -179,7 +183,7 @@ if [[ -e "${PECAN_ENV}" ]]; then
   LIBRARY_PATH="${PECAN_ENV}/lib" \
   LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     "${PECAN_ENV}/bin/Rscript" -e "
-      options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
+      options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
       renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.workflow', 'PEcAnAssimSequential'), prompt = FALSE)
     "
   validate
@@ -249,7 +253,7 @@ OMP_NUM_THREADS=1 \
 LIBRARY_PATH="${PECAN_ENV}/lib" \
 LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
-    options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
+    options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
     renv::restore(lockfile = '${PECAN_ENV}/renv.lock', exclude = c('PEcAn.data.remote', 'PEcAn.SIPNET', 'PEcAn.workflow', 'PEcAnAssimSequential'), prompt = FALSE)
   "
 R_LIBS="${PECAN_ENV}/lib/R/library" \
@@ -288,7 +292,7 @@ OMP_NUM_THREADS=1 \
 LIBRARY_PATH="${PECAN_ENV}/lib" \
 LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
-    options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
+    options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
     renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.workflow', 'PEcAnAssimSequential'), prompt = FALSE)
   "
 
