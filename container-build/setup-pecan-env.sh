@@ -104,28 +104,13 @@ if [[ -e "${PECAN_ENV}" ]]; then
   eval "$(conda shell.bash hook)"
   conda activate "${PECAN_ENV}"
   set -u
-  R_LIBS="${PECAN_ENV}/lib/R/library" \
-  R_LIBS_USER="" \
-  R_LIBS_SITE="" \
-  RENV_PATHS_CACHE="${PECAN_ENV}/renv-source-cache" \
-  RENV_PATHS_SOURCE="${PECAN_ENV}/renv-source-cache/sources" \
-  RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
-  ARROW_HOME="${PECAN_ENV}" \
-  PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
-  PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
-  OPENBLAS_NUM_THREADS=1 \
-  OMP_NUM_THREADS=1 \
-  LIBRARY_PATH="${PECAN_ENV}/lib" \
-  LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
-    "${PECAN_ENV}/bin/Rscript" -e "
-      options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
-      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
-    "
-  # Installed in isolation: PEcAn.data.remote and PEcAn.SIPNET are both pulled from
-  # GitHub develop instead of r-universe while also being reachable through other
-  # packages' dependency graphs, and restoring them alongside everything else has
-  # raced pak's install graph into staging two copies of the same package
-  # concurrently ("target file ... already exists" under renv-graph-staging).
+  # Installed in isolation, and before anything that depends on them: PEcAn.data.remote
+  # and PEcAn.SIPNET are both pulled from GitHub develop instead of r-universe while also
+  # being reachable through other packages' (e.g. PEcAnAssimSequential's) dependency
+  # graphs. Restoring them only after — or alongside — those other packages lets pak's
+  # install graph pull in a second copy of the same package and race itself while staging
+  # ("target file ... already exists" under renv-graph-staging). Doing them first means
+  # later restores just see an already-satisfied dependency instead of re-resolving it.
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
   R_LIBS_SITE="" \
@@ -142,6 +127,23 @@ if [[ -e "${PECAN_ENV}" ]]; then
     "${PECAN_ENV}/bin/Rscript" -e "
       options(renv.install.timeout = 21600, renv.config.install.jobs = 1)
       renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote', 'PEcAn.SIPNET'), prompt = FALSE)
+    "
+  R_LIBS="${PECAN_ENV}/lib/R/library" \
+  R_LIBS_USER="" \
+  R_LIBS_SITE="" \
+  RENV_PATHS_CACHE="${PECAN_ENV}/renv-source-cache" \
+  RENV_PATHS_SOURCE="${PECAN_ENV}/renv-source-cache/sources" \
+  RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
+  ARROW_HOME="${PECAN_ENV}" \
+  PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+  PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+  OPENBLAS_NUM_THREADS=1 \
+  OMP_NUM_THREADS=1 \
+  LIBRARY_PATH="${PECAN_ENV}/lib" \
+  LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
+    "${PECAN_ENV}/bin/Rscript" -e "
+      options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
+      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
     "
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
@@ -191,28 +193,13 @@ conda-unpack
 
 # 4. Restore R packages
 log "Restoring R packages — this takes 20-40 minutes..."
-R_LIBS="${PECAN_ENV}/lib/R/library" \
-R_LIBS_USER="" \
-R_LIBS_SITE="" \
-RENV_PATHS_CACHE="${PECAN_ENV}/renv-source-cache" \
-RENV_PATHS_SOURCE="${PECAN_ENV}/renv-source-cache/sources" \
-RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
-ARROW_HOME="${PECAN_ENV}" \
-PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
-PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
-OPENBLAS_NUM_THREADS=1 \
-OMP_NUM_THREADS=1 \
-LIBRARY_PATH="${PECAN_ENV}/lib" \
-LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
-  "${PECAN_ENV}/bin/Rscript" -e "
-    options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
-    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
-  "
-# Installed in isolation: PEcAn.data.remote and PEcAn.SIPNET are both pulled from
-# GitHub develop instead of r-universe while also being reachable through other
-# packages' dependency graphs, and restoring them alongside everything else has
-# raced pak's install graph into staging two copies of the same package
-# concurrently ("target file ... already exists" under renv-graph-staging).
+# Installed in isolation, and before anything that depends on them: PEcAn.data.remote
+# and PEcAn.SIPNET are both pulled from GitHub develop instead of r-universe while also
+# being reachable through other packages' (e.g. PEcAnAssimSequential's) dependency
+# graphs. Restoring them only after — or alongside — those other packages lets pak's
+# install graph pull in a second copy of the same package and race itself while staging
+# ("target file ... already exists" under renv-graph-staging). Doing them first means
+# later restores just see an already-satisfied dependency instead of re-resolving it.
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
 R_LIBS_SITE="" \
@@ -229,6 +216,23 @@ LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
     options(renv.install.timeout = 21600, renv.config.install.jobs = 1)
     renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote', 'PEcAn.SIPNET'), prompt = FALSE)
+  "
+R_LIBS="${PECAN_ENV}/lib/R/library" \
+R_LIBS_USER="" \
+R_LIBS_SITE="" \
+RENV_PATHS_CACHE="${PECAN_ENV}/renv-source-cache" \
+RENV_PATHS_SOURCE="${PECAN_ENV}/renv-source-cache/sources" \
+RENV_PATHS_LIBRARY="${PECAN_ENV}/lib/R/library" \
+ARROW_HOME="${PECAN_ENV}" \
+PKG_CONFIG_PATH="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+PKG_CONFIG_LIBDIR="${PECAN_ENV}/lib/pkgconfig:${PECAN_ENV}/share/pkgconfig" \
+OPENBLAS_NUM_THREADS=1 \
+OMP_NUM_THREADS=1 \
+LIBRARY_PATH="${PECAN_ENV}/lib" \
+LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
+  "${PECAN_ENV}/bin/Rscript" -e "
+    options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
+    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
   "
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
