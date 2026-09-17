@@ -121,10 +121,11 @@ if [[ -e "${PECAN_ENV}" ]]; then
       options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
       renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
     "
-  # Installed in isolation: PEcAn.data.remote is pulled from GitHub develop but is
-  # also a hard dependency of PEcAn.all, and restoring it alongside other packages
-  # has raced pak's install graph into staging two copies of it concurrently
-  # ("target file ... already exists" under renv-graph-staging).
+  # Installed in isolation: PEcAn.data.remote and PEcAn.SIPNET are both pulled from
+  # GitHub develop instead of r-universe while also being reachable through other
+  # packages' dependency graphs, and restoring them alongside everything else has
+  # raced pak's install graph into staging two copies of the same package
+  # concurrently ("target file ... already exists" under renv-graph-staging).
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
   R_LIBS_SITE="" \
@@ -140,7 +141,7 @@ if [[ -e "${PECAN_ENV}" ]]; then
   LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     "${PECAN_ENV}/bin/Rscript" -e "
       options(renv.install.timeout = 21600, renv.config.install.jobs = 1)
-      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote'), prompt = FALSE)
+      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote', 'PEcAn.SIPNET'), prompt = FALSE)
     "
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
@@ -207,10 +208,11 @@ LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     options(renv.install.timeout = 21600, renv.config.install.jobs = 2)
     renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAnAssimSequential', 'nneo', 'amerifluxr'), prompt = FALSE)
   "
-# Installed in isolation: PEcAn.data.remote is pulled from GitHub develop but is
-# also a hard dependency of PEcAn.all, and restoring it alongside other packages
-# has raced pak's install graph into staging two copies of it concurrently
-# ("target file ... already exists" under renv-graph-staging).
+# Installed in isolation: PEcAn.data.remote and PEcAn.SIPNET are both pulled from
+# GitHub develop instead of r-universe while also being reachable through other
+# packages' dependency graphs, and restoring them alongside everything else has
+# raced pak's install graph into staging two copies of the same package
+# concurrently ("target file ... already exists" under renv-graph-staging).
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
 R_LIBS_SITE="" \
@@ -226,7 +228,7 @@ LIBRARY_PATH="${PECAN_ENV}/lib" \
 LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
     options(renv.install.timeout = 21600, renv.config.install.jobs = 1)
-    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote'), prompt = FALSE)
+    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = c('PEcAn.data.remote', 'PEcAn.SIPNET'), prompt = FALSE)
   "
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
