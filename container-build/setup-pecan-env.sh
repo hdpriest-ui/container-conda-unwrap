@@ -108,36 +108,29 @@ if [[ -e "${PECAN_ENV}" ]]; then
   eval "$(conda shell.bash hook)"
   conda activate "${PECAN_ENV}"
   set -u
-  # PEcAn.data.remote and PEcAn.SIPNET are genuinely GitHub-subdir packages in the
-  # lockfile (modules/data.remote, models/sipnet — pulled off develop, not yet in an
-  # r-universe build). renv::restore()'s git-style subdir extraction for records like
-  # this stages into a path keyed only by package name, and collides with itself
-  # ("target file ... already exists" under renv-graph-staging) regardless of
-  # ordering or parallelism.
-  #
-  # Fix: renv::restore(exclude = ...) skips them, but its docs warn that an exclude
-  # request is ignored for any package still needed as a dependency of something else
-  # in scope — and PEcAn.all Depends on PEcAn.data.remote directly (confirmed against
-  # its DESCRIPTION), so excluding just the two targets (or even them plus the two
-  # dependents we first guessed at, PEcAn.workflow/PEcAnAssimSequential) still left
-  # PEcAn.all pulling PEcAn.data.remote back in and hitting the same staging bug. Rather
-  # than keep enumerating dependents by hand, the exclude set below is computed from
-  # each lockfile record's own Requirements field (renv's Depends+Imports+LinkingTo
-  # closure, the same one pak's restore graph itself uses) — the full set of packages
-  # that transitively require either target, however deep — so nothing is missed.
-  # This lets the rest of the lockfile — including arrow — restore normally, fully
-  # lockfile-pinned. Only then are the two broken records installed directly via
-  # renv::install(),
-  # bypassing restore()'s graph/staging path; pinned to the RemoteSha already recorded
-  # in the lockfile (not the floating "develop" branch) so this reuses the source
-  # tarball already cached at build time instead of re-resolving "develop" against
-  # GitHub right now and possibly pulling a different, untested commit. Doing this
-  # only after the exclude-restore matters: renv's pak backend installs with
-  # upgrade = FALSE, leaving already-installed dependencies alone unless a
-  # constraint demands otherwise (github.com/rstudio/renv/issues/2329) — so arrow
-  # needs to already be installed at the locked version by this point, or pak will
-  # freely resolve it (and got 25.0.1, which doesn't build against the older
-  # conda-linked libarrow, when this ran before arrow was restored).
+  # Root cause (confirmed against renv's own source, R/graph.R): restore()'s classic
+  # installer batches every package it's asked to touch into one renv_graph_install()
+  # call, which creates a single shared staging directory for that whole batch. GitHub
+  # subdir packages (RemoteSubdir set — modules/data.remote, models/sipnet,
+  # modules/assim.sequential) are unpacked into staging/<package> as part of that batch;
+  # if the same package is reachable from more than one thing in the same batch (e.g.
+  # PEcAn.workflow's Imports and PEcAn.all's Depends both reaching PEcAn.data.remote),
+  # it gets queued for that unpack-and-move twice, and the second move fails because
+  # the first one's directory is still there ("target file ... already exists").
+  # This isn't limited to two packages, and excluding-by-computed-closure kept missing
+  # dependents (PEcAn.all first, something else after). Since the bug is fundamentally
+  # about batching, the fix is to never batch our own PEcAn.* packages together at all:
+  # exclude every one of them from the bulk restore below (a fixed, known list — no
+  # dependency graph to get wrong), then install each one individually, one call at a
+  # time, in the same order the build itself used. A single-target install() only ever
+  # has to resolve for that one package, so there is no second reference to collide
+  # with. GitHub-sourced records are pinned to the RemoteSha already recorded in the
+  # lockfile (not a floating branch) so they reuse the source tarball already cached at
+  # build time under RENV_PATHS_SOURCE instead of hitting the network. This also avoids
+  # arrow drifting to a newer version pak would otherwise resolve freely for an
+  # unconstrained dependency: everything non-PEcAn (including arrow) is restored,
+  # lockfile-pinned, by the bulk call below before any of these packages get installed.
+  OURS="PEcAn.logger,PEcAn.utils,PEcAn.settings,PEcAn.DB,PEcAn.remote,PEcAn.priors,PEcAn.MA,PEcAn.emulator,PEcAn.uncertainty,PEcAn.data.remote,PEcAn.data.atmosphere,PEcAn.data.land,PEcAn.benchmark,PEcAn.workflow,PEcAn.assim.batch,PEcAn.all,PEcAn.RothC,PEPRMT,PEcAn.SIPNET,nneo,amerifluxr,PEcAnAssimSequential"
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
   R_LIBS_SITE="" \
@@ -151,21 +144,11 @@ if [[ -e "${PECAN_ENV}" ]]; then
   OMP_NUM_THREADS=1 \
   LIBRARY_PATH="${PECAN_ENV}/lib" \
   LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
+  OURS="${OURS}" \
     "${PECAN_ENV}/bin/Rscript" -e "
       options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
-      lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
-      targets <- c('PEcAn.data.remote', 'PEcAn.SIPNET')
-      reqs <- lapply(lockfile\$Packages, function(rec) if (is.null(rec\$Requirements)) character(0) else rec\$Requirements)
-      frontier <- targets
-      closure <- character(0)
-      repeat {
-        hit <- names(reqs)[vapply(reqs, function(r) any(frontier %in% r), logical(1))]
-        new <- setdiff(hit, closure)
-        if (!length(new)) break
-        closure <- union(closure, new)
-        frontier <- new
-      }
-      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', exclude = union(targets, closure), prompt = FALSE)
+      ours <- strsplit(Sys.getenv('OURS'), ',')[[1]]
+      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', exclude = ours, prompt = FALSE)
     "
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
@@ -180,14 +163,24 @@ if [[ -e "${PECAN_ENV}" ]]; then
   OMP_NUM_THREADS=1 \
   LIBRARY_PATH="${PECAN_ENV}/lib" \
   LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
+  OURS="${OURS}" \
     "${PECAN_ENV}/bin/Rscript" -e "
-      options(renv.install.timeout = 21600, repos = c(CRAN = 'https://cloud.r-project.org', pecan = 'https://pecanproject.r-universe.dev'), timeout = 600)
+      options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS}, repos = c(CRAN = 'https://cloud.r-project.org', pecan = 'https://pecanproject.r-universe.dev'), timeout = 600)
       lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
-      specs <- vapply(c('PEcAn.data.remote', 'PEcAn.SIPNET'), function(pkg) {
+      ours <- strsplit(Sys.getenv('OURS'), ',')[[1]]
+      for (pkg in ours) {
         rec <- lockfile\$Packages[[pkg]]
-        paste0('github::', rec\$RemoteUsername, '/', rec\$RemoteRepo, '/', rec\$RemoteSubdir, '@', rec\$RemoteSha)
-      }, character(1))
-      renv::install(specs)
+        if (is.null(rec)) next
+        spec <- if (identical(rec\$Source, 'GitHub')) {
+          base <- paste0(rec\$RemoteUsername, '/', rec\$RemoteRepo)
+          subdir <- rec\$RemoteSubdir
+          if (!is.null(subdir) && nzchar(subdir)) base <- paste0(base, '/', subdir)
+          paste0('github::', base, '@', rec\$RemoteSha)
+        } else {
+          pkg
+        }
+        renv::install(spec)
+      }
     "
   R_LIBS="${PECAN_ENV}/lib/R/library" \
   R_LIBS_USER="" \
@@ -204,19 +197,7 @@ if [[ -e "${PECAN_ENV}" ]]; then
   LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
     "${PECAN_ENV}/bin/Rscript" -e "
       options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
-      lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
-      targets <- c('PEcAn.data.remote', 'PEcAn.SIPNET')
-      reqs <- lapply(lockfile\$Packages, function(rec) if (is.null(rec\$Requirements)) character(0) else rec\$Requirements)
-      frontier <- targets
-      closure <- character(0)
-      repeat {
-        hit <- names(reqs)[vapply(reqs, function(r) any(frontier %in% r), logical(1))]
-        new <- setdiff(hit, closure)
-        if (!length(new)) break
-        closure <- union(closure, new)
-        frontier <- new
-      }
-      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = closure, prompt = FALSE)
+      renv::restore(lockfile = '${PECAN_ENV}/renv.lock', prompt = FALSE)
     "
   validate
   echo ""
@@ -249,36 +230,29 @@ conda-unpack
 
 # 4. Restore R packages
 log "Restoring R packages — this takes 20-40 minutes..."
-# PEcAn.data.remote and PEcAn.SIPNET are genuinely GitHub-subdir packages in the
-# lockfile (modules/data.remote, models/sipnet — pulled off develop, not yet in an
-# r-universe build). renv::restore()'s git-style subdir extraction for records like
-# this stages into a path keyed only by package name, and collides with itself
-# ("target file ... already exists" under renv-graph-staging) regardless of
-# ordering or parallelism.
-#
-# Fix: renv::restore(exclude = ...) skips them, but its docs warn that an exclude
-# request is ignored for any package still needed as a dependency of something else
-# in scope — and PEcAn.all Depends on PEcAn.data.remote directly (confirmed against
-# its DESCRIPTION), so excluding just the two targets (or even them plus the two
-# dependents we first guessed at, PEcAn.workflow/PEcAnAssimSequential) still left
-# PEcAn.all pulling PEcAn.data.remote back in and hitting the same staging bug. Rather
-# than keep enumerating dependents by hand, the exclude set below is computed from
-# each lockfile record's own Requirements field (renv's Depends+Imports+LinkingTo
-# closure, the same one pak's restore graph itself uses) — the full set of packages
-# that transitively require either target, however deep — so nothing is missed.
-# This lets the rest of the lockfile — including arrow — restore normally, fully
-# lockfile-pinned. Only then are the two broken records installed directly via
-# renv::install(),
-# bypassing restore()'s graph/staging path; pinned to the RemoteSha already recorded
-# in the lockfile (not the floating "develop" branch) so this reuses the source
-# tarball already cached at build time instead of re-resolving "develop" against
-# GitHub right now and possibly pulling a different, untested commit. Doing this
-# only after the exclude-restore matters: renv's pak backend installs with
-# upgrade = FALSE, leaving already-installed dependencies alone unless a
-# constraint demands otherwise (github.com/rstudio/renv/issues/2329) — so arrow
-# needs to already be installed at the locked version by this point, or pak will
-# freely resolve it (and got 25.0.1, which doesn't build against the older
-# conda-linked libarrow, when this ran before arrow was restored).
+# Root cause (confirmed against renv's own source, R/graph.R): restore()'s classic
+# installer batches every package it's asked to touch into one renv_graph_install()
+# call, which creates a single shared staging directory for that whole batch. GitHub
+# subdir packages (RemoteSubdir set — modules/data.remote, models/sipnet,
+# modules/assim.sequential) are unpacked into staging/<package> as part of that batch;
+# if the same package is reachable from more than one thing in the same batch (e.g.
+# PEcAn.workflow's Imports and PEcAn.all's Depends both reaching PEcAn.data.remote),
+# it gets queued for that unpack-and-move twice, and the second move fails because
+# the first one's directory is still there ("target file ... already exists").
+# This isn't limited to two packages, and excluding-by-computed-closure kept missing
+# dependents (PEcAn.all first, something else after). Since the bug is fundamentally
+# about batching, the fix is to never batch our own PEcAn.* packages together at all:
+# exclude every one of them from the bulk restore below (a fixed, known list — no
+# dependency graph to get wrong), then install each one individually, one call at a
+# time, in the same order the build itself used. A single-target install() only ever
+# has to resolve for that one package, so there is no second reference to collide
+# with. GitHub-sourced records are pinned to the RemoteSha already recorded in the
+# lockfile (not a floating branch) so they reuse the source tarball already cached at
+# build time under RENV_PATHS_SOURCE instead of hitting the network. This also avoids
+# arrow drifting to a newer version pak would otherwise resolve freely for an
+# unconstrained dependency: everything non-PEcAn (including arrow) is restored,
+# lockfile-pinned, by the bulk call below before any of these packages get installed.
+OURS="PEcAn.logger,PEcAn.utils,PEcAn.settings,PEcAn.DB,PEcAn.remote,PEcAn.priors,PEcAn.MA,PEcAn.emulator,PEcAn.uncertainty,PEcAn.data.remote,PEcAn.data.atmosphere,PEcAn.data.land,PEcAn.benchmark,PEcAn.workflow,PEcAn.assim.batch,PEcAn.all,PEcAn.RothC,PEPRMT,PEcAn.SIPNET,nneo,amerifluxr,PEcAnAssimSequential"
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
 R_LIBS_SITE="" \
@@ -292,21 +266,11 @@ OPENBLAS_NUM_THREADS=1 \
 OMP_NUM_THREADS=1 \
 LIBRARY_PATH="${PECAN_ENV}/lib" \
 LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
+OURS="${OURS}" \
   "${PECAN_ENV}/bin/Rscript" -e "
     options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
-    lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
-    targets <- c('PEcAn.data.remote', 'PEcAn.SIPNET')
-    reqs <- lapply(lockfile\$Packages, function(rec) if (is.null(rec\$Requirements)) character(0) else rec\$Requirements)
-    frontier <- targets
-    closure <- character(0)
-    repeat {
-      hit <- names(reqs)[vapply(reqs, function(r) any(frontier %in% r), logical(1))]
-      new <- setdiff(hit, closure)
-      if (!length(new)) break
-      closure <- union(closure, new)
-      frontier <- new
-    }
-    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', exclude = union(targets, closure), prompt = FALSE)
+    ours <- strsplit(Sys.getenv('OURS'), ',')[[1]]
+    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', exclude = ours, prompt = FALSE)
   "
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
@@ -321,14 +285,24 @@ OPENBLAS_NUM_THREADS=1 \
 OMP_NUM_THREADS=1 \
 LIBRARY_PATH="${PECAN_ENV}/lib" \
 LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
+OURS="${OURS}" \
   "${PECAN_ENV}/bin/Rscript" -e "
-    options(renv.install.timeout = 21600, repos = c(CRAN = 'https://cloud.r-project.org', pecan = 'https://pecanproject.r-universe.dev'), timeout = 600)
+    options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS}, repos = c(CRAN = 'https://cloud.r-project.org', pecan = 'https://pecanproject.r-universe.dev'), timeout = 600)
     lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
-    specs <- vapply(c('PEcAn.data.remote', 'PEcAn.SIPNET'), function(pkg) {
+    ours <- strsplit(Sys.getenv('OURS'), ',')[[1]]
+    for (pkg in ours) {
       rec <- lockfile\$Packages[[pkg]]
-      paste0('github::', rec\$RemoteUsername, '/', rec\$RemoteRepo, '/', rec\$RemoteSubdir, '@', rec\$RemoteSha)
-    }, character(1))
-    renv::install(specs)
+      if (is.null(rec)) next
+      spec <- if (identical(rec\$Source, 'GitHub')) {
+        base <- paste0(rec\$RemoteUsername, '/', rec\$RemoteRepo)
+        subdir <- rec\$RemoteSubdir
+        if (!is.null(subdir) && nzchar(subdir)) base <- paste0(base, '/', subdir)
+        paste0('github::', base, '@', rec\$RemoteSha)
+      } else {
+        pkg
+      }
+      renv::install(spec)
+    }
   "
 R_LIBS="${PECAN_ENV}/lib/R/library" \
 R_LIBS_USER="" \
@@ -345,19 +319,7 @@ LIBRARY_PATH="${PECAN_ENV}/lib" \
 LD_LIBRARY_PATH="${PECAN_ENV}/lib" \
   "${PECAN_ENV}/bin/Rscript" -e "
     options(renv.install.timeout = 21600, renv.config.install.jobs = ${INSTALL_JOBS})
-    lockfile <- renv:::renv_lockfile_read('${PECAN_ENV}/renv.lock')
-    targets <- c('PEcAn.data.remote', 'PEcAn.SIPNET')
-    reqs <- lapply(lockfile\$Packages, function(rec) if (is.null(rec\$Requirements)) character(0) else rec\$Requirements)
-    frontier <- targets
-    closure <- character(0)
-    repeat {
-      hit <- names(reqs)[vapply(reqs, function(r) any(frontier %in% r), logical(1))]
-      new <- setdiff(hit, closure)
-      if (!length(new)) break
-      closure <- union(closure, new)
-      frontier <- new
-    }
-    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', packages = closure, prompt = FALSE)
+    renv::restore(lockfile = '${PECAN_ENV}/renv.lock', prompt = FALSE)
   "
 
 # 5. Verify
